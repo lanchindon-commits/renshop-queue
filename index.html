@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>抽取號碼牌網頁</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root { --brand:#e8501b; --ink:#1d1d1f; --muted:#6b6b70; --line:#e3e3e6; --bg:#f6f6f7; --ok:#1f9d55; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:var(--ink); color:#fff; padding:16px 20px; font-weight:700; letter-spacing:.5px; }
+  header small { display:block; font-weight:400; opacity:.7; font-size:12px; margin-top:2px; }
+  main { padding:20px 16px 120px; max-width:480px; margin:0 auto; }
+  .card { background:#fff; border-radius:14px; padding:20px; margin-bottom:14px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+  h2 { margin:0 0 6px; font-size:20px; }
+  p.hint { margin:0 0 14px; color:var(--muted); font-size:14px; line-height:1.5; }
+  input[type=text] { width:100%; font-size:22px; letter-spacing:2px; text-transform:uppercase; padding:14px; border:2px solid var(--line); border-radius:10px; text-align:center; }
+  input[type=text]:focus { outline:none; border-color:var(--brand); }
+  .chips { display:flex; flex-wrap:wrap; gap:10px; }
+  .chip { border:2px solid var(--line); background:#fff; border-radius:999px; padding:10px 16px; font-size:16px; cursor:pointer; user-select:none; }
+  .chip.on { border-color:var(--brand); background:#fff1ec; color:var(--brand); font-weight:600; }
+  .btn { display:block; width:100%; border:0; border-radius:12px; padding:16px; font-size:18px; font-weight:700; cursor:pointer; margin-top:14px; }
+  .btn.primary { background:var(--brand); color:#fff; }
+  .btn.ghost { background:#fff; color:var(--ink); border:2px solid var(--line); }
+  .btn:disabled { opacity:.45; }
+  .link { background:none; border:0; color:var(--brand); font-size:14px; padding:8px 0; cursor:pointer; text-decoration:underline; }
+  .err { color:#c62828; font-size:14px; margin-top:10px; min-height:1em; }
+  .ticket { text-align:center; padding:30px 20px; }
+  .ticket .label { font-size:72px; font-weight:800; color:var(--brand); letter-spacing:4px; margin:8px 0; }
+  .ticket .ahead { font-size:18px; }
+  .ticket .ahead b { font-size:26px; color:var(--ink); }
+  .summary { text-align:left; background:var(--bg); border-radius:10px; padding:12px 14px; margin-top:16px; font-size:14px; line-height:1.7; }
+  .hidden { display:none !important; }
+  .loading { text-align:center; color:var(--muted); padding:60px 0; }
+</style>
+</head>
+<body>
+<header>忍店機車行 抽取號碼牌<small>取號後請稍坐，叫到號碼再到櫃台</small></header>
+<main>
+  <div id="loading" class="loading">載入中…</div>
+
+  <!-- 已綁定：問候 -->
+  <section id="vBound" class="card hidden">
+    <h2 id="greet"></h2>
+    <p class="hint">請問今天要做什麼服務呢？</p>
+    <div id="carPick" class="chips hidden" style="margin-bottom:12px"></div>
+    <button class="link" id="otherCar">今天騎的是別台車？</button>
+  </section>
+
+  <!-- 未綁定：輸入車牌 -->
+  <section id="vPlate" class="card hidden">
+    <h2>請輸入車牌</h2>
+    <p class="hint">輸入後幫您查詢資料，下次來就不用再輸入。</p>
+    <input type="text" id="plate" placeholder="例如 NJS-5520" autocomplete="off" inputmode="latin">
+    <div class="err" id="plateErr"></div>
+    <button class="btn primary" id="plateBtn">查詢</button>
+  </section>
+
+  <!-- 有資料：確認 -->
+  <section id="vFound" class="card hidden">
+    <h2 id="foundTitle"></h2>
+    <p class="hint">確認車牌沒錯就完成綁定，接著勾選今天的服務。</p>
+    <button class="link" id="reenter">車牌打錯了，重新輸入</button>
+  </section>
+
+  <!-- 第一次來 -->
+  <section id="vNew" class="card hidden">
+    <h2>歡迎第一次來忍店！</h2>
+    <p class="hint" id="newHint"></p>
+    <button class="btn primary" id="toRegister">填寫基本資料</button>
+    <button class="link" id="reenter2">車牌打錯了，重新輸入</button>
+  </section>
+
+  <!-- 服務項目 -->
+  <section id="vItems" class="card hidden">
+    <h2>今天的服務項目</h2>
+    <p class="hint">可複選，師傅會先看過再跟您確認。</p>
+    <div class="chips" id="items"></div>
+    <div class="err" id="takeErr"></div>
+    <button class="btn primary" id="takeBtn" disabled>取號</button>
+  </section>
+
+  <!-- 多車確認 -->
+  <section id="vConfirm" class="card hidden">
+    <h2>確認一下</h2>
+    <p class="hint" id="confirmMsg"></p>
+    <button class="btn primary" id="cfAdd">新增這台車</button>
+    <button class="btn ghost" id="cfReplace">之前那台打錯了，改成這台</button>
+  </section>
+
+  <!-- 號碼 -->
+  <section id="vTicket" class="card ticket hidden">
+    <div>您的號碼</div>
+    <div class="label" id="tLabel"></div>
+    <div class="ahead" id="tAhead"></div>
+    <div class="summary" id="tSummary"></div>
+    <button class="btn ghost" id="closeBtn">關閉</button>
+  </section>
+</main>
+
+<script>
+const CONFIG = {
+  LIFF_ID: '2009551033-oZpYRgSW',
+  SUPABASE_URL: 'https://hxzdmosganinyhtrswlj.supabase.co',
+  SUPABASE_KEY: 'sb_publishable_AYWfHD9vBAVk4Fv1tcuEVw_RTPM71RQ',
+  REGISTER_URL: 'https://liff.line.me/2009551033-SAcB0ZjL',
+  ITEMS: ['保養','換機油','齒輪油','輪胎','煞車','電瓶','燈具','異音檢查','驗車','其他'],
+};
+
+const $ = id => document.getElementById(id);
+const VIEWS = ['loading','vBound','vPlate','vFound','vNew','vItems','vConfirm','vTicket'];
+const show = (...ids) => VIEWS.forEach(v => $(v).classList.toggle('hidden', !ids.includes(v)));
+const state = { profile:null, car:null, items:new Set(), boundCars:[] };
+
+async function rpc(fn, args) {
+  const r = await fetch(`${CONFIG.SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method:'POST',
+    headers:{ apikey:CONFIG.SUPABASE_KEY, Authorization:`Bearer ${CONFIG.SUPABASE_KEY}`, 'Content-Type':'application/json' },
+    body:JSON.stringify(args || {}),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+const normPlate = s => (s || '').trim().toUpperCase().replace(/\s+/g, '');
+
+function renderItems() {
+  const box = $('items'); box.innerHTML = '';
+  CONFIG.ITEMS.forEach(name => {
+    const c = document.createElement('div');
+    c.className = 'chip' + (state.items.has(name) ? ' on' : '');
+    c.textContent = name;
+    c.onclick = () => { state.items.has(name) ? state.items.delete(name) : state.items.add(name); renderItems(); };
+    box.appendChild(c);
+  });
+  $('takeBtn').disabled = state.items.size === 0;
+}
+
+function showBound(cars) {
+  state.boundCars = cars;
+  state.car = state.car && cars.includes(state.car) ? state.car : cars[0];
+  $('greet').textContent = `${state.car} 您好！`;
+  const pick = $('carPick');
+  if (cars.length > 1) {
+    pick.classList.remove('hidden'); pick.innerHTML = '';
+    cars.forEach(car => {
+      const c = document.createElement('div');
+      c.className = 'chip' + (car === state.car ? ' on' : '');
+      c.textContent = car;
+      c.onclick = () => { state.car = car; showBound(cars); };
+      pick.appendChild(c);
+    });
+  } else pick.classList.add('hidden');
+  renderItems();
+  show('vBound','vItems');
+}
+
+function showTicket(res) {
+  $('tLabel').textContent = res.label;
+  $('tAhead').innerHTML = res.ahead > 0 ? `前面還有 <b>${res.ahead}</b> 位` : '<b>下一位就是您</b>';
+  const items = res.items || [...state.items];
+  $('tSummary').innerHTML = `車牌：${res.car_no}` + (items.length ? `<br>項目：${items.join('、')}` : '') +
+    (res.bind_status === 'conflict' ? '<br><span style="color:#c62828">這台車的通知綁在其他 LINE，櫃台會協助確認。</span>' : '');
+  show('vTicket');
+}
+
+async function lookup() {
+  const plate = normPlate($('plate').value);
+  $('plateErr').textContent = '';
+  if (plate.replace(/-/g,'').length < 5) { $('plateErr').textContent = '請輸入完整車牌'; return; }
+  $('plateBtn').disabled = true;
+  try {
+    const r = await rpc('lookup_car', { p_car_no: plate });
+    state.car = r.car_no;
+    if (r.exists) {
+      $('foundTitle').textContent = `找到了！${r.car_no}`;
+      renderItems();
+      show('vFound','vItems');
+    } else {
+      $('newHint').textContent = `查不到 ${plate} 的資料，請先花 1 分鐘填寫基本資料，填完會回到這裡取號。`;
+      show('vNew');
+    }
+  } catch (e) { $('plateErr').textContent = '查詢失敗，請再試一次或洽櫃台'; }
+  $('plateBtn').disabled = false;
+}
+
+async function take(confirmAction, oldCar) {
+  $('takeErr').textContent = '';
+  $('takeBtn').disabled = true;
+  try {
+    const r = await rpc('take_queue_ticket', {
+      p_car_no: state.car, p_line_user_id: state.profile.userId, p_line_display_name: state.profile.displayName,
+      p_items: [...state.items], p_confirm_action: confirmAction || null, p_old_car_no: oldCar || null,
+    });
+    if (r.need_confirm) {
+      $('confirmMsg').textContent = r.message;
+      state.oldCar = (r.existing_cars || [])[0];
+      show('vConfirm'); return;
+    }
+    if (r.error) {
+      if (r.error === 'not_found') { show('vNew'); return; }
+      $('takeErr').textContent = r.message || '取號失敗，請洽櫃台'; $('takeBtn').disabled = false; return;
+    }
+    showTicket(r);
+    if (!r.duplicate) notifyChat(r);
+  } catch (e) { $('takeErr').textContent = '取號失敗，請再試一次或洽櫃台'; $('takeBtn').disabled = false; }
+}
+
+async function notifyChat(r) {
+  try {
+    if (!liff.isInClient()) return;
+    await liff.sendMessages([{ type:'text', text:`我已取號 ${r.label}\n車牌：${r.car_no}\n項目：${[...state.items].join('、')}` }]);
+  } catch (e) { /* 從 QR Code 開啟時可能沒有聊天室，略過 */ }
+}
+
+function toPlate() { $('plate').value = ''; show('vPlate'); setTimeout(() => $('plate').focus(), 50); }
+
+$('plateBtn').onclick = lookup;
+$('plate').addEventListener('keydown', e => { if (e.key === 'Enter') lookup(); });
+$('otherCar').onclick = toPlate;
+$('reenter').onclick = toPlate;
+$('reenter2').onclick = toPlate;
+$('takeBtn').onclick = () => take();
+$('cfAdd').onclick = () => { show('vItems'); take('add'); };
+$('cfReplace').onclick = () => { show('vItems'); take('replace', state.oldCar); };
+$('toRegister').onclick = () => {
+  const back = encodeURIComponent(`https://liff.line.me/${CONFIG.LIFF_ID}`);
+  location.href = `${CONFIG.REGISTER_URL}?car_no=${encodeURIComponent(state.car || '')}&from=queue&return=${back}`;
+};
+$('closeBtn').onclick = () => liff.isInClient() ? liff.closeWindow() : window.close();
+
+(async function init() {
+  try {
+    await liff.init({ liffId: CONFIG.LIFF_ID });
+    if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+    state.profile = await liff.getProfile();
+    const id = await rpc('get_queue_identity', { p_line_user_id: state.profile.userId });
+    if (id.active_ticket) {
+      showTicket({ ...id.active_ticket, items: [] });
+      return;
+    }
+    if (id.bound && id.cars.length) {
+      // 從註冊表單回來時，優先用帶回來的車牌
+      const back = normPlate(new URLSearchParams(location.search).get('car_no'));
+      if (back && id.cars.map(c => c.replace(/-/g,'')).includes(back.replace(/-/g,''))) state.car = id.cars.find(c => c.replace(/-/g,'') === back.replace(/-/g,''));
+      showBound(id.cars);
+    } else {
+      const back = normPlate(new URLSearchParams(location.search).get('car_no'));
+      if (back) { $('plate').value = back; lookup(); } else toPlate();
+    }
+  } catch (e) {
+    $('loading').textContent = '載入失敗，請關閉後重新掃描 QR Code';
+  }
+})();
+</script>
+</body>
+</html>
