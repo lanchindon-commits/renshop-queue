@@ -73,7 +73,7 @@
   <section id="vNew" class="card hidden">
     <h2>歡迎第一次來忍店！</h2>
     <p class="hint" id="newHint"></p>
-    <button class="btn primary" id="toRegister">填寫基本資料</button>
+    <button class="btn primary" id="toRegister">沒有自動跳轉？點這裡填寫</button>
     <button class="link" id="reenter2">車牌打錯了，重新輸入</button>
   </section>
 
@@ -208,8 +208,14 @@ async function lookup() {
       renderItems();
       show('vFound','vItems');
     } else {
-      $('newHint').textContent = `查不到 ${plate} 的資料，請先花 1 分鐘填寫基本資料，填完會回到這裡取號。`;
-      show('vNew');
+      $('newHint').textContent = `查不到 ${plate} 的資料，正在帶您到基本資料表單，填完會自動回到這裡取號…`;
+      if (state.fromRegister) {
+        $('newHint').textContent = `您的資料已送出，系統還在建檔中，請洽櫃台人員協助取號，謝謝！`;
+        show('vNew');
+      } else {
+        show('vNew');
+        setTimeout(goRegister, 1800);
+      }
     }
   } catch (e) { $('plateErr').textContent = '查詢失敗，請再試一次或洽櫃台'; }
   $('plateBtn').disabled = false;
@@ -255,10 +261,11 @@ $('takeBtn').onclick = () => take();
 $('note').addEventListener('input', updateTakeBtn);
 $('cfAdd').onclick = () => { show('vItems'); take('add'); };
 $('cfReplace').onclick = () => { show('vItems'); take('replace', state.oldCar); };
-$('toRegister').onclick = () => {
+function goRegister() {
   const back = encodeURIComponent(`https://liff.line.me/${CONFIG.LIFF_ID}`);
   location.href = `${CONFIG.REGISTER_URL}?car_no=${encodeURIComponent(state.car || '')}&from=queue&return=${back}`;
-};
+}
+$('toRegister').onclick = goRegister;
 $('closeBtn').onclick = () => liff.isInClient() ? liff.closeWindow() : window.close();
 
 (async function init() {
@@ -278,7 +285,7 @@ $('closeBtn').onclick = () => liff.isInClient() ? liff.closeWindow() : window.cl
       showBound(id.cars);
     } else {
       const back = normPlate(new URLSearchParams(location.search).get('car_no'));
-      if (back) { $('plate').value = back; lookup(); } else toPlate();
+      if (back) { state.fromRegister = true; $('plate').value = back; lookup(); } else toPlate();
     }
   } catch (e) {
     $('loading').textContent = '載入失敗，請關閉後重新掃描 QR Code';
