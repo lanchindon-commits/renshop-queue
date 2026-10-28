@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>櫃台工作台</title>
+<style>
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:#f4f4f6; font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif; overflow:hidden; }
+  .wrap { display:flex; height:100vh; }
+  .pane { height:100%; position:relative; }
+  .pane iframe { width:100%; height:100%; border:0; display:block; background:#fff; }
+  #left { flex:0 0 55%; }
+  #right { flex:1 1 auto; min-width:0; }
+  #split { flex:0 0 8px; cursor:col-resize; background:#d9d9de; }
+  #split:hover, #split.drag { background:#e8501b; }
+  .cover { position:fixed; inset:0; display:none; cursor:col-resize; z-index:5; }
+  .cover.on { display:block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="pane" id="left"><iframe src="https://lanchindon-commits.github.io/teamup-daily-board/" title="行事曆"></iframe></div>
+  <div id="split" title="拖曳調整左右寬度"></div>
+  <div class="pane" id="right"><iframe src="staff.html" title="叫號"></iframe></div>
+</div>
+<div class="cover" id="cover"></div>
+<script>
+const left = document.getElementById('left'), split = document.getElementById('split'), cover = document.getElementById('cover');
+try { const w = localStorage.getItem('counter_split'); if (w) left.style.flexBasis = w; } catch (e) {}
+split.addEventListener('pointerdown', () => { split.classList.add('drag'); cover.classList.add('on'); });
+cover.addEventListener('pointermove', e => {
+  const pct = Math.min(80, Math.max(25, e.clientX / innerWidth * 100));
+  left.style.flexBasis = pct + '%';
+});
+cover.addEventListener('pointerup', () => {
+  split.classList.remove('drag'); cover.classList.remove('on');
+  try { localStorage.setItem('counter_split', left.style.flexBasis); } catch (e) {}
+});
+</script>
+</body>
+</html>
