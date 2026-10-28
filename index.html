@@ -20,6 +20,11 @@
   .chips { display:flex; flex-wrap:wrap; gap:10px; }
   .chip { border:2px solid var(--line); background:#fff; border-radius:999px; padding:10px 16px; font-size:16px; cursor:pointer; user-select:none; }
   .chip.on { border-color:var(--brand); background:#fff1ec; color:var(--brand); font-weight:600; }
+  .siderow { display:flex; align-items:center; gap:10px; margin-top:12px; }
+  .siderow span { width:64px; font-size:16px; }
+  .notelabel { display:block; margin:18px 0 6px; font-size:14px; color:var(--muted); }
+  textarea { width:100%; font-size:16px; padding:12px; border:2px solid var(--line); border-radius:10px; font-family:inherit; resize:vertical; }
+  textarea:focus { outline:none; border-color:var(--brand); }
   .btn { display:block; width:100%; border:0; border-radius:12px; padding:16px; font-size:18px; font-weight:700; cursor:pointer; margin-top:14px; }
   .btn.primary { background:var(--brand); color:#fff; }
   .btn.ghost { background:#fff; color:var(--ink); border:2px solid var(--line); }
@@ -76,7 +81,9 @@
   <section id="vItems" class="card hidden">
     <h2>今天的服務項目</h2>
     <p class="hint">可複選，師傅會先看過再跟您確認。</p>
-    <div class="chips" id="items"></div>
+    <div id="items"></div>
+    <label class="notelabel" for="note">備註（其他狀況可以寫在這裡）</label>
+    <textarea id="note" rows="3" maxlength="200" placeholder="例如：騎到 60 公里會抖、儀表燈亮"></textarea>
     <div class="err" id="takeErr"></div>
     <button class="btn primary" id="takeBtn" disabled>取號</button>
   </section>
@@ -105,7 +112,12 @@ const CONFIG = {
   SUPABASE_URL: 'https://hxzdmosganinyhtrswlj.supabase.co',
   SUPABASE_KEY: 'sb_publishable_AYWfHD9vBAVk4Fv1tcuEVw_RTPM71RQ',
   REGISTER_URL: 'https://liff.line.me/2009551033-SAcB0ZjL',
-  ITEMS: ['保養','換機油','齒輪油','輪胎','煞車','電瓶','燈具','異音檢查','驗車','其他'],
+  // 依店內粉紅色工單牌；sides:true = 分前/後
+  ITEMS: [
+    { name:'機油' }, { name:'齒輪油' }, { name:'空濾' }, { name:'濾心' },
+    { name:'輪胎', sides:true }, { name:'剎車皮', sides:true }, { name:'剎車油', sides:true },
+    { name:'火星塞' }, { name:'皮帶' }, { name:'發不動' },
+  ],
 };
 
 const $ = id => document.getElementById(id);
@@ -124,17 +136,33 @@ async function rpc(fn, args) {
 }
 const normPlate = s => (s || '').trim().toUpperCase().replace(/\s+/g, '');
 
+function chip(key, text) {
+  const c = document.createElement('div');
+  c.className = 'chip' + (state.items.has(key) ? ' on' : '');
+  c.textContent = text;
+  c.onclick = () => { state.items.has(key) ? state.items.delete(key) : state.items.add(key); renderItems(); };
+  return c;
+}
 function renderItems() {
   const box = $('items'); box.innerHTML = '';
-  CONFIG.ITEMS.forEach(name => {
-    const c = document.createElement('div');
-    c.className = 'chip' + (state.items.has(name) ? ' on' : '');
-    c.textContent = name;
-    c.onclick = () => { state.items.has(name) ? state.items.delete(name) : state.items.add(name); renderItems(); };
-    box.appendChild(c);
+  const simple = document.createElement('div'); simple.className = 'chips';
+  CONFIG.ITEMS.filter(i => !i.sides).forEach(i => simple.appendChild(chip(i.name, i.name)));
+  box.appendChild(simple);
+  CONFIG.ITEMS.filter(i => i.sides).forEach(i => {
+    const row = document.createElement('div'); row.className = 'siderow';
+    const lb = document.createElement('span'); lb.textContent = i.name; row.appendChild(lb);
+    row.appendChild(chip(`${i.name}(前)`, '前'));
+    row.appendChild(chip(`${i.name}(後)`, '後'));
+    box.appendChild(row);
   });
-  $('takeBtn').disabled = state.items.size === 0;
+  updateTakeBtn();
 }
+const orderedItems = () => {
+  const keys = [];
+  CONFIG.ITEMS.forEach(i => (i.sides ? [`${i.name}(前)`, `${i.name}(後)`] : [i.name]).forEach(k => state.items.has(k) && keys.push(k)));
+  return keys;
+};
+const updateTakeBtn = () => { $('takeBtn').disabled = state.items.size === 0 && !$('note').value.trim(); };
 
 function showBound(cars) {
   state.boundCars = cars;
@@ -158,8 +186,11 @@ function showBound(cars) {
 function showTicket(res) {
   $('tLabel').textContent = res.label;
   $('tAhead').innerHTML = res.ahead > 0 ? `前面還有 <b>${res.ahead}</b> 位` : '<b>下一位就是您</b>';
-  const items = res.items || [...state.items];
+  const items = res.items || orderedItems();
+  const note = res.items ? '' : $('note').value.trim();
+  const esc = s => s.replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
   $('tSummary').innerHTML = `車牌：${res.car_no}` + (items.length ? `<br>項目：${items.join('、')}` : '') +
+    (note ? `<br>備註：${esc(note)}` : '') +
     (res.bind_status === 'conflict' ? '<br><span style="color:#c62828">這台車的通知綁在其他 LINE，櫃台會協助確認。</span>' : '');
   show('vTicket');
 }
@@ -190,7 +221,7 @@ async function take(confirmAction, oldCar) {
   try {
     const r = await rpc('take_queue_ticket', {
       p_car_no: state.car, p_line_user_id: state.profile.userId, p_line_display_name: state.profile.displayName,
-      p_items: [...state.items], p_confirm_action: confirmAction || null, p_old_car_no: oldCar || null,
+      p_items: orderedItems(), p_note: $('note').value.trim() || null, p_confirm_action: confirmAction || null, p_old_car_no: oldCar || null,
     });
     if (r.need_confirm) {
       $('confirmMsg').textContent = r.message;
@@ -209,7 +240,7 @@ async function take(confirmAction, oldCar) {
 async function notifyChat(r) {
   try {
     if (!liff.isInClient()) return;
-    await liff.sendMessages([{ type:'text', text:`我已取號 ${r.label}\n車牌：${r.car_no}\n項目：${[...state.items].join('、')}` }]);
+    await liff.sendMessages([{ type:'text', text:`我已取號 ${r.label}\n車牌：${r.car_no}\n項目：${orderedItems().join('、') || '—'}` + ($('note').value.trim() ? `\n備註：${$('note').value.trim()}` : '') }]);
   } catch (e) { /* 從 QR Code 開啟時可能沒有聊天室，略過 */ }
 }
 
@@ -221,6 +252,7 @@ $('otherCar').onclick = toPlate;
 $('reenter').onclick = toPlate;
 $('reenter2').onclick = toPlate;
 $('takeBtn').onclick = () => take();
+$('note').addEventListener('input', updateTakeBtn);
 $('cfAdd').onclick = () => { show('vItems'); take('add'); };
 $('cfReplace').onclick = () => { show('vItems'); take('replace', state.oldCar); };
 $('toRegister').onclick = () => {
