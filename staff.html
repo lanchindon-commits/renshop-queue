@@ -69,6 +69,8 @@ const SUPABASE_KEY = 'sb_publishable_AYWfHD9vBAVk4Fv1tcuEVw_RTPM71RQ';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = id => document.getElementById(id);
 let PIN = '';
+const MAX_SERVING = 5;
+let FULL = false;
 try { PIN = localStorage.getItem('queue_pin') || ''; } catch (e) {}
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
@@ -89,7 +91,7 @@ function card(t) {
                  (t.bind_status === 'bound_now' ? '<span class="badge new">本次新綁定</span>' : '');
   const items = (t.service_items || []).map(i => `<span>${esc(i)}</span>`).join('');
   let acts = '';
-  if (t.status === 'waiting') acts = `<button class="btn primary" data-act="call" data-id="${t.id}">叫號</button><button class="btn ghost" data-act="skipped" data-id="${t.id}">過號</button>`;
+  if (t.status === 'waiting') acts = `<button class="btn primary" data-act="call" data-id="${t.id}" ${FULL ? 'disabled title="工台已滿"' : ''}>叫號</button><button class="btn ghost" data-act="skipped" data-id="${t.id}">過號</button>`;
   if (t.status === 'serving') acts = `<button class="btn ok" data-act="done" data-id="${t.id}">完成</button><button class="btn ghost" data-act="skipped" data-id="${t.id}">過號</button><button class="btn ghost" data-act="waiting" data-id="${t.id}">退回等候</button>`;
   if (t.status === 'skipped') acts = `<button class="btn ghost" data-act="waiting" data-id="${t.id}">重新排入</button>`;
   const time = t.status === 'waiting' ? `取號 ${hm(t.created_at)}・已等 ${mins(t.created_at)} 分`
@@ -112,19 +114,20 @@ async function refresh() {
   let list;
   try { list = await call('get_queue_staff'); } catch (e) { return; }
   const by = s => list.filter(t => s.includes(t.status));
+  FULL = by(['serving']).length >= MAX_SERVING;
   const render = (id, arr, emptyText) => $(id).innerHTML = arr.length ? arr.map(card).join('') : `<div class="empty">${emptyText}</div>`;
   render('serving', by(['serving']), '目前沒有服務中的號碼');
   render('waiting', by(['waiting']), '目前沒有人在等');
   render('done', by(['done','skipped']).reverse(), '—');
-  $('stat').textContent = `等候 ${by(['waiting']).length} 位・今日 ${list.length} 號`;
-  $('nextBtn').disabled = by(['waiting']).length === 0;
+  $('stat').textContent = (FULL ? '工台已滿，請先完成一台・' : '') + `服務中 ${by(['serving']).length}/${MAX_SERVING}・等候 ${by(['waiting']).length} 位・今日 ${list.length} 號`;
+  $('nextBtn').disabled = by(['waiting']).length === 0 || FULL;
 }
 
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   b.disabled = true;
   try {
-    if (b.dataset.act === 'call') await call('call_next_ticket', { p_ticket_id: b.dataset.id });
+    if (b.dataset.act === 'call') { const r = await call('call_next_ticket', { p_ticket_id: b.dataset.id }); if (r && r.error) alertBar(r.message); }
     else await call('update_ticket_status', { p_ticket_id: b.dataset.id, p_status: b.dataset.act });
   } catch (err) { alertBar('操作失敗，請再試一次'); }
   refresh();
