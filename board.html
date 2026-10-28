@@ -29,9 +29,10 @@
   .count small { font-size:2.4vw; color:var(--muted); font-weight:500; margin-left:.6vw; }
   .next { display:flex; flex-wrap:wrap; gap:1vw; margin-top:1vw; }
   .next span { font-size:2.6vw; background:#2a2a2d; padding:.4vw 1.2vw; border-radius:1vw; }
-  .qr { display:flex; flex-direction:column; gap:1.2vw; align-items:center; justify-content:center; flex:1; text-align:center; }
-  .qr #qrcode { background:#fff; padding:1vw; border-radius:1vw; }
-  .qr p { margin:0; font-size:1.8vw; line-height:1.4; }
+  .qr { display:flex; flex-direction:column; align-items:center; justify-content:center; flex:1; text-align:center; min-height:0; }
+  .qr #qrcode { background:#fff; padding:1vw; border-radius:1vw; line-height:0; }
+  .qr #qrcode img, .qr #qrcode canvas { display:block; }
+  .qr p { margin:1.2vw 0 0; font-size:2vw; line-height:1.4; }
   .qr p b { color:var(--brand); }
   #unlock { position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; font-size:3vw; cursor:pointer; z-index:9; }
   #unlock span { border:2px solid #fff; padding:2vw 4vw; border-radius:2vw; }
@@ -63,7 +64,15 @@ const LIFF_URL = 'https://liff.line.me/2009551033-oZpYRgSW';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let lastTop = null, audio = null;
 
-new QRCode(document.getElementById('qrcode'), { text: LIFF_URL, width: Math.round(innerWidth * 0.11), height: Math.round(innerWidth * 0.11) });
+function drawQR() {
+  const box = document.querySelector('.qr'), el = document.getElementById('qrcode'), txt = box.querySelector('p');
+  const pad = innerWidth * 0.02;
+  const size = Math.floor(Math.min(box.clientWidth * 0.8, box.clientHeight - txt.offsetHeight - innerWidth * 0.06) - pad);
+  el.innerHTML = '';
+  new QRCode(el, { text: LIFF_URL, width: Math.max(120, size), height: Math.max(120, size), correctLevel: QRCode.CorrectLevel.M });
+}
+drawQR();
+let qrTimer; addEventListener('resize', () => { clearTimeout(qrTimer); qrTimer = setTimeout(drawQR, 300); });
 
 document.getElementById('unlock').onclick = () => {
   audio = new (window.AudioContext || window.webkitAudioContext)();
