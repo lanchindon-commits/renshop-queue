@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>叫號看板</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root { --brand:#e8501b; --ink:#111; --bg:#0f0f10; --panel:#1b1b1d; --muted:#9a9aa0; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:#fff; font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif; overflow:hidden; }
+  .wrap { display:grid; grid-template-columns: 1.6fr 1fr; gap:2vw; height:100vh; padding:3vw; }
+  .now { background:var(--panel); border-radius:2vw; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  .now .t { font-size:3.2vw; color:var(--muted); letter-spacing:.3vw; }
+  .now .num { font-size:20vw; font-weight:900; color:var(--brand); line-height:1; margin:1vw 0; letter-spacing:.5vw; }
+  .now .num.idle { font-size:5vw; color:#666; font-weight:600; letter-spacing:0; margin:4vw 0; }
+  .now .num.flash { animation:flash 1s ease-in-out 3; }
+  .now .also { font-size:2.6vw; color:#ddd; min-height:3.4vw; }
+  @keyframes flash { 50% { color:#fff; transform:scale(1.05); } }
+  .side { display:flex; flex-direction:column; gap:2vw; }
+  .box { background:var(--panel); border-radius:2vw; padding:2vw 2.4vw; }
+  .box h3 { margin:0 0 1vw; font-size:2.2vw; color:var(--muted); font-weight:600; }
+  .count { font-size:6vw; font-weight:800; }
+  .count small { font-size:2.4vw; color:var(--muted); font-weight:500; margin-left:.6vw; }
+  .next { display:flex; flex-wrap:wrap; gap:1vw; margin-top:1vw; }
+  .next span { font-size:2.6vw; background:#2a2a2d; padding:.4vw 1.2vw; border-radius:1vw; }
+  .qr { display:flex; gap:2vw; align-items:center; flex:1; }
+  .qr #qrcode { background:#fff; padding:1vw; border-radius:1vw; }
+  .qr p { margin:0; font-size:2.2vw; line-height:1.5; }
+  .qr p b { color:var(--brand); }
+  #unlock { position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; font-size:3vw; cursor:pointer; z-index:9; }
+  #unlock span { border:2px solid #fff; padding:2vw 4vw; border-radius:2vw; }
+</style>
+</head>
+<body>
+<div id="unlock"><span>點一下畫面，開啟叫號提示音</span></div>
+<div class="wrap">
+  <div class="now">
+    <div class="t">請以下號碼到櫃台</div>
+    <div class="num idle" id="num">目前沒有叫號</div>
+    <div class="also" id="also"></div>
+  </div>
+  <div class="side">
+    <div class="box">
+      <h3>等候中</h3>
+      <div class="count"><span id="cnt">0</span><small>位</small></div>
+      <div class="next" id="next"></div>
+    </div>
+    <div class="box qr">
+      <div id="qrcode"></div>
+      <p>還沒取號嗎？<br>用 LINE 掃描<br><b>線上取號</b></p>
+    </div>
+  </div>
+</div>
+<script>
+const SUPABASE_URL = 'https://hxzdmosganinyhtrswlj.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_AYWfHD9vBAVk4Fv1tcuEVw_RTPM71RQ';
+const LIFF_URL = 'https://liff.line.me/2009551033-oZpYRgSW';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let lastTop = null, audio = null;
+
+new QRCode(document.getElementById('qrcode'), { text: LIFF_URL, width: Math.round(innerWidth * 0.12), height: Math.round(innerWidth * 0.12) });
+
+document.getElementById('unlock').onclick = () => {
+  audio = new (window.AudioContext || window.webkitAudioContext)();
+  document.getElementById('unlock').remove();
+};
+function chime() {
+  if (!audio) return;
+  [880, 660].forEach((f, i) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = f; o.connect(g); g.connect(audio.destination);
+    const t = audio.currentTime + i * 0.35;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.4, t + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    o.start(t); o.stop(t + 0.55);
+  });
+}
+
+async function refresh() {
+  const { data, error } = await sb.rpc('get_queue_board');
+  if (error || !data) return;
+  const serving = data.serving || [], waiting = data.waiting || [];
+  const top = serving[0] || null;
+  const num = document.getElementById('num');
+  num.textContent = top || '目前沒有叫號';
+  num.classList.toggle('idle', !top);
+  document.getElementById('also').textContent = serving.length > 1 ? `服務中：${serving.slice(1).join('、')}` : '';
+  document.getElementById('cnt').textContent = data.waiting_count || 0;
+  document.getElementById('next').innerHTML = waiting.slice(0, 6).map(n => `<span>${n}</span>`).join('');
+  if (top && top !== lastTop && lastTop !== null) { num.classList.remove('flash'); void num.offsetWidth; num.classList.add('flash'); chime(); }
+  lastTop = top || '';
+}
+
+sb.channel('queue').on('postgres_changes', { event: '*', schema: 'public', table: 'queue_signal' }, refresh).subscribe();
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
