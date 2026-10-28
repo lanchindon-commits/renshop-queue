@@ -2,7 +2,14 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="叫號看板">
+<meta name="theme-color" content="#0f0f10">
+<link rel="manifest" href="board.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
 <title>叫號看板</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -10,7 +17,7 @@
   :root { --brand:#e8501b; --ink:#111; --bg:#0f0f10; --panel:#1b1b1d; --muted:#9a9aa0; }
   * { box-sizing:border-box; }
   html,body { margin:0; height:100%; background:var(--bg); color:#fff; font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif; overflow:hidden; }
-  .wrap { display:grid; grid-template-columns: 2.2fr 1fr; gap:2vw; height:100vh; padding:3vw; }
+  .wrap { display:grid; grid-template-columns: 2.2fr 1fr; gap:2vw; height:100vh; height:100dvh; padding:max(3vw, env(safe-area-inset-top)) max(3vw, env(safe-area-inset-right)) max(3vw, env(safe-area-inset-bottom)) max(3vw, env(safe-area-inset-left)); }
   .now { background:var(--panel); border-radius:2vw; display:flex; flex-direction:column; padding:2.4vw; min-width:0; }
   .now .head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1.6vw; }
   .now .t { font-size:3vw; color:#ddd; font-weight:700; letter-spacing:.3vw; }
@@ -35,11 +42,15 @@
   .qr p { margin:1.2vw 0 0; font-size:2vw; line-height:1.4; }
   .qr p b { color:var(--brand); }
   #unlock { position:fixed; inset:0; background:rgba(0,0,0,.85); display:flex; align-items:center; justify-content:center; font-size:3vw; cursor:pointer; z-index:9; }
-  #unlock span { border:2px solid #fff; padding:2vw 4vw; border-radius:2vw; }
+  #unlock span { border:2px solid #fff; padding:2vw 4vw; border-radius:2vw; text-align:center; line-height:1.6; }
+  #unlock small { display:block; font-size:1.6vw; opacity:.7; }
+  #fsBtn { position:fixed; right:1vw; bottom:1vw; z-index:8; background:rgba(255,255,255,.08); color:#888; border:0; border-radius:1vw; font-size:1.4vw; padding:.6vw 1vw; cursor:pointer; }
+  :fullscreen #fsBtn, :-webkit-full-screen #fsBtn { display:none; }
 </style>
 </head>
 <body>
-<div id="unlock"><span>點一下畫面，開啟叫號提示音</span></div>
+<div id="unlock"><span>點一下畫面開始<small>全螢幕顯示＋開啟叫號提示音</small></span></div>
+<button id="fsBtn">⛶ 全螢幕</button>
 <div class="wrap">
   <div class="now">
     <div class="head"><div class="t">目前維修號碼</div><div class="cap" id="cap"></div></div>
@@ -74,10 +85,24 @@ function drawQR() {
 drawQR();
 let qrTimer; addEventListener('resize', () => { clearTimeout(qrTimer); qrTimer = setTimeout(drawQR, 300); });
 
+function goFullscreen() {
+  const el = document.documentElement;
+  const fn = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitEnterFullscreen;
+  try { const r = fn && fn.call(el); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+}
+let wakeLock = null;
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
 document.getElementById('unlock').onclick = () => {
-  audio = new (window.AudioContext || window.webkitAudioContext)();
+  try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  goFullscreen(); keepAwake();
   document.getElementById('unlock').remove();
 };
+document.getElementById('fsBtn').onclick = goFullscreen;
+// 從主畫面圖示開啟時已經是全螢幕，不顯示按鈕
+if (window.navigator.standalone || matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches) document.getElementById('fsBtn').style.display = 'none';
 function chime() {
   if (!audio) return;
   [880, 660].forEach((f, i) => {
