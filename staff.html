@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>店員叫號</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+  :root { --brand:#e8501b; --ink:#1d1d1f; --muted:#6b6b70; --line:#e3e3e6; --bg:#f4f4f6; --ok:#1f9d55; --warn:#c62828; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif; }
+  header { background:var(--ink); color:#fff; padding:14px 20px; display:flex; align-items:center; gap:16px; position:sticky; top:0; z-index:2; }
+  header h1 { font-size:18px; margin:0; flex:1; }
+  header .stat { font-size:14px; opacity:.85; }
+  .btn { border:0; border-radius:10px; padding:10px 16px; font-size:15px; font-weight:700; cursor:pointer; }
+  .btn.primary { background:var(--brand); color:#fff; }
+  .btn.big { font-size:18px; padding:14px 22px; }
+  .btn.ok { background:var(--ok); color:#fff; }
+  .btn.ghost { background:#fff; color:var(--ink); border:1.5px solid var(--line); }
+  .btn:disabled { opacity:.4; }
+  main { max-width:1100px; margin:0 auto; padding:16px; }
+  h2 { font-size:15px; color:var(--muted); margin:20px 4px 10px; font-weight:600; }
+  .card { background:#fff; border-radius:12px; padding:14px 16px; margin-bottom:10px; display:grid; grid-template-columns:90px 1fr auto; gap:14px; align-items:center; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+  .card.serving { border:2px solid var(--brand); }
+  .card.dim { opacity:.55; }
+  .no { font-size:30px; font-weight:800; color:var(--brand); text-align:center; }
+  .car { font-size:18px; font-weight:700; }
+  .car small { font-weight:400; color:var(--muted); font-size:14px; margin-left:6px; }
+  .items { margin-top:6px; display:flex; flex-wrap:wrap; gap:6px; }
+  .items span { background:#fff1ec; color:var(--brand); border-radius:999px; padding:3px 10px; font-size:14px; font-weight:600; }
+  .note { margin-top:6px; font-size:14px; background:#fffbe6; border-left:3px solid #f5b400; padding:6px 10px; border-radius:4px; }
+  .meta { margin-top:6px; font-size:13px; color:var(--muted); }
+  .badge { display:inline-block; font-size:12px; padding:2px 8px; border-radius:6px; margin-left:6px; }
+  .badge.warn { background:#fdecea; color:var(--warn); }
+  .badge.new { background:#e8f5e9; color:var(--ok); }
+  .acts { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .empty { color:var(--muted); padding:16px 4px; }
+  #login { max-width:320px; margin:18vh auto; background:#fff; border-radius:14px; padding:28px; text-align:center; }
+  #login input { width:100%; font-size:28px; letter-spacing:10px; text-align:center; padding:12px; border:2px solid var(--line); border-radius:10px; margin:14px 0; }
+  .err { color:var(--warn); font-size:14px; min-height:1em; }
+  .hidden { display:none !important; }
+  @media (max-width:640px) { .card { grid-template-columns:64px 1fr; } .acts { grid-column:1 / -1; justify-content:stretch; } .acts .btn { flex:1; } .no { font-size:24px; } }
+</style>
+</head>
+<body>
+<div id="login">
+  <h3 style="margin:0">店員叫號</h3>
+  <input id="pin" type="password" inputmode="numeric" maxlength="8" placeholder="PIN">
+  <div class="err" id="pinErr"></div>
+  <button class="btn primary big" style="width:100%" id="loginBtn">登入</button>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>忍店 叫號</h1>
+    <span class="stat" id="stat"></span>
+    <button class="btn primary big" id="nextBtn">叫下一號</button>
+  </header>
+  <main>
+    <h2>服務中</h2><div id="serving"></div>
+    <h2>等候中</h2><div id="waiting"></div>
+    <h2>今日已完成 / 過號</h2><div id="done"></div>
+  </main>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://hxzdmosganinyhtrswlj.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_AYWfHD9vBAVk4Fv1tcuEVw_RTPM71RQ';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = id => document.getElementById(id);
+let PIN = '';
+try { PIN = localStorage.getItem('queue_pin') || ''; } catch (e) {}
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const hm = t => t ? new Date(t).toLocaleTimeString('zh-TW', { hour:'2-digit', minute:'2-digit', hour12:false }) : '';
+const mins = t => Math.max(0, Math.round((Date.now() - new Date(t)) / 60000));
+
+async function call(fn, args) {
+  const { data, error } = await sb.rpc(fn, { p_pin: PIN, ...args });
+  if (error) {
+    if (String(error.message).includes('invalid_pin')) { logout('PIN 錯誤'); }
+    throw error;
+  }
+  return data;
+}
+
+function card(t) {
+  const badges = (t.bind_status === 'conflict' ? '<span class="badge warn">LINE 綁定衝突，請確認</span>' : '') +
+                 (t.bind_status === 'bound_now' ? '<span class="badge new">本次新綁定</span>' : '');
+  const items = (t.service_items || []).map(i => `<span>${esc(i)}</span>`).join('');
+  let acts = '';
+  if (t.status === 'waiting') acts = `<button class="btn primary" data-act="call" data-id="${t.id}">叫號</button><button class="btn ghost" data-act="skipped" data-id="${t.id}">過號</button>`;
+  if (t.status === 'serving') acts = `<button class="btn ok" data-act="done" data-id="${t.id}">完成</button><button class="btn ghost" data-act="skipped" data-id="${t.id}">過號</button><button class="btn ghost" data-act="waiting" data-id="${t.id}">退回等候</button>`;
+  if (t.status === 'skipped') acts = `<button class="btn ghost" data-act="waiting" data-id="${t.id}">重新排入</button>`;
+  const time = t.status === 'waiting' ? `取號 ${hm(t.created_at)}・已等 ${mins(t.created_at)} 分`
+             : t.status === 'serving' ? `取號 ${hm(t.created_at)}・叫號 ${hm(t.called_at)}`
+             : `${t.status === 'done' ? '完成' : '過號'} ${hm(t.done_at)}`;
+  return `<div class="card ${t.status === 'serving' ? 'serving' : ''} ${['done','skipped'].includes(t.status) ? 'dim' : ''}">
+    <div class="no">${esc(t.label)}</div>
+    <div>
+      <div class="car">${esc(t.car_no)}<small>${esc(t.name || '')}${t.line_display_name ? '（LINE：' + esc(t.line_display_name) + '）' : ''}</small>${badges}</div>
+      ${items ? `<div class="items">${items}</div>` : ''}
+      ${t.note ? `<div class="note">備註：${esc(t.note)}</div>` : ''}
+      <div class="meta">${time}</div>
+    </div>
+    <div class="acts">${acts}</div>
+  </div>`;
+}
+
+async function refresh() {
+  if (!PIN) return;
+  let list;
+  try { list = await call('get_queue_staff'); } catch (e) { return; }
+  const by = s => list.filter(t => s.includes(t.status));
+  const render = (id, arr, emptyText) => $(id).innerHTML = arr.length ? arr.map(card).join('') : `<div class="empty">${emptyText}</div>`;
+  render('serving', by(['serving']), '目前沒有服務中的號碼');
+  render('waiting', by(['waiting']), '目前沒有人在等');
+  render('done', by(['done','skipped']).reverse(), '—');
+  $('stat').textContent = `等候 ${by(['waiting']).length} 位・今日 ${list.length} 號`;
+  $('nextBtn').disabled = by(['waiting']).length === 0;
+}
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  b.disabled = true;
+  try {
+    if (b.dataset.act === 'call') await call('call_next_ticket', { p_ticket_id: b.dataset.id });
+    else await call('update_ticket_status', { p_ticket_id: b.dataset.id, p_status: b.dataset.act });
+  } catch (err) { alertBar('操作失敗，請再試一次'); }
+  refresh();
+});
+$('nextBtn').onclick = async () => {
+  $('nextBtn').disabled = true;
+  try { const r = await call('call_next_ticket', { p_ticket_id: null }); if (r && r.error) alertBar(r.message); } catch (e) {}
+  refresh();
+};
+function alertBar(msg) { $('stat').textContent = msg; }
+
+async function login() {
+  PIN = $('pin').value.trim(); $('pinErr').textContent = '';
+  try {
+    await call('get_queue_staff');
+    try { localStorage.setItem('queue_pin', PIN); } catch (e) {}
+    $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+    refresh();
+  } catch (e) { $('pinErr').textContent = 'PIN 錯誤'; }
+}
+function logout(msg) {
+  PIN = ''; try { localStorage.removeItem('queue_pin'); } catch (e) {}
+  $('app').classList.add('hidden'); $('login').classList.remove('hidden'); $('pinErr').textContent = msg || '';
+}
+$('loginBtn').onclick = login;
+$('pin').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+
+sb.channel('queue-staff').on('postgres_changes', { event: '*', schema: 'public', table: 'queue_signal' }, refresh).subscribe();
+setInterval(refresh, 30000);
+if (PIN) { $('login').classList.add('hidden'); $('app').classList.remove('hidden'); refresh(); }
+</script>
+</body>
+</html>
